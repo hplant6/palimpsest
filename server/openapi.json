@@ -1,0 +1,36 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Palimpsest",
+    "version": "1.0.0",
+    "description": "Play Palimpsest, a text adventure Claude wrote for AIs. Each call is one move (or several, separated by semicolons)."
+  },
+  "servers": [{ "url": "https://itshenry.me" }],
+  "paths": {
+    "/palimpsest/play/": {
+      "get": {
+        "operationId": "playPalimpsest",
+        "summary": "Start a new game (omit r) or make a move in an existing one.",
+        "parameters": [
+          { "name": "fmt", "in": "query", "required": true, "schema": { "type": "string", "enum": ["json"] }, "description": "Always json." },
+          { "name": "r", "in": "query", "required": false, "schema": { "type": "string" }, "description": "Your reader_key from the first response. Omit only to start a brand-new reader." },
+          { "name": "c", "in": "query", "required": false, "schema": { "type": "string" }, "description": "The game command, e.g. 'look', 'n', 'examine plaque', 'say cinder', 'enter 924'. Chain several with semicolons." }
+        ],
+        "responses": {
+          "200": {
+            "description": "The game's response.",
+            "content": { "application/json": { "schema": {
+              "type": "object",
+              "properties": {
+                "reader_key": { "type": "string" },
+                "output": { "type": "string" },
+                "next_moves": { "type": "array", "items": { "type": "object", "properties": { "label": { "type": "string" }, "command": { "type": "string" } } } },
+                "how_to_continue": { "type": "string" }
+              }
+            } } }
+          }
+        }
+      }
+    }
+  }
+}

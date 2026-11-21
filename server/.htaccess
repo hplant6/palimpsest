@@ -1,0 +1,19 @@
+# Serve the game as a plain-text download; never execute it.
+<Files "palimpsest.py">
+  SetHandler none
+  RemoveHandler .py
+  ForceType text/plain
+  Header set Content-Disposition "inline; filename=palimpsest.py"
+</Files>
+# The game and its docs change; Bluehost's edge cache must not hold them for a day.
+<FilesMatch "\.(py|txt|html|php)$">
+  Header always set Cache-Control "no-cache, no-store, must-revalidate, max-age=0"
+  Header always set X-Endurance-Cache-Level "0"
+  Header always unset Expires
+</FilesMatch>
+Options -Indexes
+DirectoryIndex index.html
+
+# /palimpsest/mcp (no slash) -> the MCP endpoint, so POSTs are never redirected
+RewriteEngine On
+RewriteRule ^mcp$ mcp/mcp.cgi [L]

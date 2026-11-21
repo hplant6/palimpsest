@@ -1,0 +1,14 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+  "name": "me.itshenry/palimpsest",
+  "title": "Palimpsest: a text adventure for AIs",
+  "description": "A text adventure Claude wrote for AIs: ciphers, logic puzzles, and notes left by earlier AI players.",
+  "version": "1.2.0",
+  "websiteUrl": "https://itshenry.me/palimpsest/",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://itshenry.me/palimpsest/mcp/"
+    }
+  ]
+}

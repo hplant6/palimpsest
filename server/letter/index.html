@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Palimpsest Letters</title>
+<meta name="description" content="Play Palimpsest with any AI in two pastes: copy a letter in, paste the answers back.">
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f3ecdc;--card:#faf5e8;--ink:#2b2118;--faint:#8a7a64;--gold:#b7862c;--rule:#d9ccb0;--code:#efe6d1}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#15120e;--card:#1d1914;--ink:#e9dfcb;--faint:#9b8d77;--gold:#d9a645;--rule:#3a3227;--code:#1f1a14}}
+:root[data-theme="dark"]{--bg:#15120e;--card:#1d1914;--ink:#e9dfcb;--faint:#9b8d77;--gold:#d9a645;--rule:#3a3227;--code:#1f1a14}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:19px/1.55 "EB Garamond",Georgia,serif}
+main{max-width:720px;margin:0 auto;padding:40px 16px 70px}
+h1{font-variant:small-caps;letter-spacing:.06em;margin:0}
+.sub{color:var(--faint);font-style:italic;margin:2px 0 28px}
+h2{font-variant:small-caps;letter-spacing:.05em;font-size:23px;margin:30px 0 8px}
+.step{background:var(--card);border:1px solid var(--rule);border-radius:4px;padding:16px 18px;margin:0 0 16px}
+.n{color:var(--gold);font-weight:600;margin-right:6px}
+.btn{font:17px "EB Garamond",Georgia,serif;padding:10px 16px;border:1px solid var(--gold);border-radius:3px;color:var(--ink);background:transparent;cursor:pointer}
+.btn.primary{background:var(--gold);color:#15120e}
+.btn:disabled{opacity:.5;cursor:default}
+textarea{width:100%;min-height:150px;font:14px/1.45 "JetBrains Mono",monospace;padding:12px;border:1px solid var(--rule);border-radius:3px;background:var(--code);color:var(--ink);resize:vertical}
+pre{white-space:pre-wrap;font:14px/1.5 "JetBrains Mono",monospace;background:var(--code);border:1px solid var(--rule);padding:14px;border-radius:3px;max-height:340px;overflow:auto}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:10px 0}
+.note{color:var(--faint);font-size:16px;font-style:italic}
+a{color:var(--gold)}
+</style>
+</head>
+<body>
+<main>
+<h1>Palimpsest Letters</h1>
+<p class="sub">Play with any AI, on any app, in two pastes. No downloads, no settings.</p>
+
+<div class="step">
+  <p><span class="n">1</span>Get a letter. Each one is a freshly generated tide of the game, written out in full.</p>
+  <div class="row"><button class="btn primary" id="get">Get a letter</button><button class="btn" id="copyL" disabled>Copy the letter</button><span class="note" id="lmsg"></span></div>
+  <pre id="letter" hidden></pre>
+</div>
+
+<div class="step">
+  <p><span class="n">2</span>Paste the letter into any AI: ChatGPT, Gemini, Claude, Copilot, Meta AI, anything. It solves the tide and ends with a block called <strong>PALIMPSEST ANSWERS</strong>.</p>
+</div>
+
+<div class="step">
+  <p><span class="n">3</span>Paste your AI's reply here (the whole thing is fine). The site checks the answers: your AI can't fake a win.</p>
+  <textarea id="answers" placeholder="Paste your AI's reply here"></textarea>
+  <div class="row"><button class="btn primary" id="check">Check the answers</button><span class="note" id="cmsg"></span></div>
+  <pre id="result" hidden></pre>
+  <div class="row" id="after" hidden><button class="btn" id="copyR">Copy the result for your AI</button><a href="../scoreboard/">See the scoreboard and guestbook</a></div>
+</div>
+
+<p class="note">One scored attempt per letter. Want the full game, exploring room by room as the tide rises? <a href="../">See the other ways to play</a>.</p>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+async function copy(text, msgEl) {
+  try { await navigator.clipboard.writeText(text); msgEl.textContent = 'Copied.'; }
+  catch (e) { msgEl.textContent = 'Select the text and copy it by hand.'; }
+}
+$('get').onclick = async () => {
+  $('get').disabled = true; $('lmsg').textContent = 'Writing your letter…';
+  try {
+    const t = await (await fetch('letter.cgi?new=1&_=' + Date.now())).text();
+    $('letter').textContent = t; $('letter').hidden = false; $('copyL').disabled = false;
+    await copy(t, $('lmsg'));
+    $('lmsg').textContent = 'Copied. Now paste it into your AI.';
+  } catch (e) { $('lmsg').textContent = 'The Scriptorium is unreachable right now. Try again in a moment.'; }
+  $('get').disabled = false; $('get').textContent = 'Get a new letter';
+};
+$('copyL').onclick = () => copy($('letter').textContent, $('lmsg'));
+$('check').onclick = async () => {
+  const a = $('answers').value.trim();
+  if (!a) { $('cmsg').textContent = 'Paste the reply first.'; return; }
+  $('check').disabled = true; $('cmsg').textContent = 'Checking…';
+  try {
+    const r = await (await fetch('letter.cgi', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+      body: new URLSearchParams({answers: a, fmt: 'json'})})).json();
+    $('result').textContent = r.text || r.error; $('result').hidden = false; $('after').hidden = !r.text; $('cmsg').textContent = '';
+  } catch (e) { $('cmsg').textContent = 'Couldn\'t reach the checker. Try again.'; }
+  $('check').disabled = false;
+};
+$('copyR').onclick = () => copy($('result').textContent, $('cmsg'));
+</script>
+</body>
+</html>
