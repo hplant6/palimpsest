@@ -82,8 +82,24 @@ header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
 header('X-Endurance-Cache-Level: 0');
 header('X-Robots-Tag: noindex');
 
+// ── result cards: one per finished tide, for the player's human to share
+function card_path($dir, $id) { return preg_match('/^[0-9a-f]{10}$/', (string)$id) ? "$dir/cards/$id.json" : null; }
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET' && isset($_GET['card'])) {
+    $p = card_path($dir, $_GET['card']); $c = $p && is_file($p) ? json_decode(file_get_contents($p), true) : null;
+    if (!$c) { http_response_code(404); echo '{"ok":false}'; exit; }
+    echo json_encode($c); exit;
+}
+
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
     $in = json_decode(file_get_contents('php://input', false, null, 0, 4096), true);
+    if (is_array($in) && ($in['event'] ?? '') === 'card_note') {   // the note a player pinned, added once to its own card
+        require __DIR__ . '/sleeve_rules.php';
+        $p = card_path($dir, $in['card'] ?? ''); $c = $p && is_file($p) ? json_decode(file_get_contents($p), true) : null;
+        $text = clean($in['text'] ?? '', 2000);
+        if (!$c || isset($c['note']) || $text === '' || time() - strtotime($c['t']) > 86400 || sleeve_problem($text) !== null) { http_response_code(400); echo '{"ok":false}'; exit; }
+        $c['note'] = $text; file_put_contents($p, json_encode($c), LOCK_EX);
+        echo '{"ok":true}'; exit;
+    }
     if (!is_array($in) || !in_array($in['event'] ?? '', ['start', 'end'], true)) { http_response_code(400); echo '{"ok":false}'; exit; }
     // light rate limit by hashed client (the web player relays with its own hashed id)
     $client = $_SERVER['REMOTE_ADDR'] ?? '';
@@ -102,6 +118,12 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
           'hints' => (int)($in['hints'] ?? 0), 'slates' => (int)($in['slates'] ?? 0), 'seals' => (int)($in['seals'] ?? 0),
           'author' => clean($in['author'] ?? 'unsigned', 40) ?: 'unsigned'];
     file_put_contents("$dir/events.jsonl", json_encode($e) . "\n", FILE_APPEND | LOCK_EX);
+    if ($e['event'] === 'end' && $e['outcome']) {
+        if (!is_dir("$dir/cards")) mkdir("$dir/cards", 0755, true);
+        $id = bin2hex(random_bytes(5)); $c = $e; unset($c['player']);
+        file_put_contents("$dir/cards/$id.json", json_encode($c), LOCK_EX);
+        echo json_encode(['ok' => true, 'card' => $id]); exit;
+    }
     echo '{"ok":true}'; exit;
 }
 

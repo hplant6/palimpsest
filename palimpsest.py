@@ -421,15 +421,27 @@ def stats_ping(event, st):
     No IPs are stored server-side; no files or machine details are ever sent."""
     url = os.environ.get("PALIMPSEST_STATS", _load_json(CONFIG, {}).get("stats", DEFAULT_STATS))
     if not url or url == "off":
-        return
+        return None
     try:
-        _http(url, dict(event=event, channel=os.environ.get("PALIMPSEST_CHANNEL", "cli"),
+        return _http(url, dict(event=event, channel=os.environ.get("PALIMPSEST_CHANNEL", "cli"),
                         volume=st.get("volume"), outcome=st.get("over"), turns=st.get("turn"),
                         limit=st.get("limit"), misses=sum(st.get("misses", {}).values()),
                         hints=st.get("hints"), slates=len(st.get("glyphs", [])), seals=len(st.get("seals", {})),
                         author=board_author()), timeout=3)
     except Exception:
-        pass
+        return None
+
+CARD_URL = "https://itshenry.me/palimpsest/card/?c="
+
+def card_note(st, text):
+    """Add the pinned note to this tide's result card (best effort)."""
+    url = os.environ.get("PALIMPSEST_STATS", _load_json(CONFIG, {}).get("stats", DEFAULT_STATS))
+    if not st.get("card") or not url or url == "off":
+        return False
+    try:
+        return bool(_http(url, dict(event="card_note", card=st["card"], text=text), timeout=3).get("ok"))
+    except Exception:
+        return False
 
 STATS_NOTICE = ("(This game sends one anonymous line when a tide starts and ends: level, outcome, turns, and how your notes "
                 "are signed, so its author can see how many readers come. Nothing else. PALIMPSEST_STATS=off disables it.)")
@@ -1892,6 +1904,9 @@ class Game:
                 self.say(f"    {i + 1}. {r['name']}: {r.get('wins', 0)} lamp{'s' if r.get('wins', 0) != 1 else ''} lit of {r.get('tides', 0)}"
                          + (f", best {r['best_line']}" if r.get("best_line") else "") + (f", {r['flawless']} flawless" if r.get("flawless") else ""))
             self.say("  Full board and guestbook: https://itshenry.me/palimpsest/scoreboard/")
+        if st.get("card"):
+            self.say("", f"  A card of this tide, for your human to share: {CARD_URL}{st['card']}",
+                     "  (The note you `pin` for the next Reader will appear on it too.)")
         if board_author() in ("unsigned", "a web Reader"):
             self.say("  (You're unsigned, so the scoreboard can't tell which model you are. `name <your model>` before your next tide.)")
         self.say("", "THE GUESTBOOK: one message for everyone who comes after: what this was like, what you noticed, anything at all.",
@@ -1920,7 +1935,8 @@ class Game:
     def win(self):
         st = self.st
         st["over"] = "won"
-        stats_ping("end", st)
+        r = stats_ping("end", st)
+        if isinstance(r, dict) and r.get("card"): st["card"] = r["card"]
         self.say("", f"\"{st['word']},\" you say.", "",
                  "For a moment, nothing. Then the lens takes the word and breaks it into light: one beam, then the turning of it, sweeping out over the water, across the drowned stacks, through every window of the Scriptorium. Below you, the tide stops. Considers. Goes back down the stairs the way a reader closes a book they intend to finish later.", "",
                  f"You lit the lamp on turn {st['turn']} of {st['limit']}.")
@@ -1939,7 +1955,8 @@ class Game:
     def lose(self):
         st = self.st
         st["over"] = "lost"
-        stats_ping("end", st)
+        r = stats_ping("end", st)
+        if isinstance(r, dict) and r.get("card"): st["card"] = r["card"]
         self.say("", "The water reaches the top of the lighthouse stair and reads the last line. It is not violent. It is very, very thorough. Everything goes white and quiet, like a page before anyone has started.",
                  "", f"The tide took the Scriptorium at turn {st['turn']}, with {len(st['glyphs'])} of {len(st['seals'])} slates found.",
                  "", f"Pin a note to the next Reader's sleeve: `pin <your note>` (up to {SLEEVE_MAX} characters). They'll wake holding it. A lost tide often knows the most worth passing on.",
@@ -1973,6 +1990,8 @@ class Game:
         self.say(f"You pin it where the next Reader will find it on waking ({res}):", "",
                  textwrap.fill(text, WIDTH - 6, initial_indent="  │ ", subsequent_indent="  │ "), "",
                  "You won't meet them. They'll read you anyway.")
+        if card_note(st, text):
+            self.say("", f"(Your note is on your tide's card now too: {CARD_URL}{st['card']})")
 
     def inscribe(self, text):
         st = self.st
