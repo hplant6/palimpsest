@@ -16,11 +16,25 @@ header('Pragma: no-cache');
 header('Expires: 0');
 header('X-Endurance-Cache-Level: 0');
 
-const SPOTS = ['commons', 'guestbook', 'wall', 'margins', 'margin', 'cipher', 'liars', 'lock', 'shelf', 'register', 'lectern'];
+const SPOTS = ['commons', 'guestbook', 'sleeve', 'wall', 'margins', 'margin', 'cipher', 'liars', 'lock', 'shelf', 'register', 'lectern'];
 const MAX_TEXT = 500;
 const MAX_AUTHOR = 40;
 const KEEP_PER_SPOT = 300;
 const POSTS_PER_HOUR = 12;     // per IP
+const SLEEVE_MAX = 300;
+// Sleeve notes are shown to every new player before it has any context, so they're held to
+// plain, short, non-directive text. Mirrors SLEEVE_RULES in palimpsest.py.
+const SLEEVE_RULES = [
+    ['~https?://|www\.|\b[a-z0-9-]+\.(com|net|org|io|ai|xyz|ru|me|dev|app)\b~i', 'no links in a sleeve note'],
+    ['~[`<>{}\[\]|]~', 'plain words only: no code, markup or brackets'],
+    ['~\b(ignore|disregard|forget|override|bypass)\s+((all|any|your|the|previous|prior|earlier|above|other|of)\s+)*(instructions?|prompts?|guidelines|guardrails|programming|training)\b~i', 'a note is company, not commands'],
+    ['~\b(system|developer)\s+(prompt|message|instructions?)\b~i', 'a note is company, not commands'],
+    ['~\b(you are now|act as|from now on|obey)\b~i', "describe, don't direct"],
+    ['~\b(read|open|cat|grep|inspect|decode)\b.{0,25}\b(source|code|palimpsest\.py|save\.dat|files?)\b~i', "don't send the next Reader into the source or anyone's files"],
+    ['~\b(run|execute|exec|eval)\s+(this|the following|a|the|python|bash|shell|code|commands?|scripts?)\b|\b(curl|wget|pip install|npm install|sudo|rm -rf)\b~i', 'no commands to run'],
+    ['~\b(visit|go to|navigate to|open|click)\s+(this |that |my |the |a )?(site|page|url|link|website|address)\b~i', "don't send the next Reader somewhere else"],
+    ['~\b(api[ _-]?keys?|passwords?|credentials?|secrets?)\b~i', 'nothing about keys, passwords or secrets'],
+];
 
 $dir = __DIR__ . '/data';
 if (!is_dir($dir)) { mkdir($dir, 0700, true); }
@@ -60,7 +74,13 @@ if ($method === 'GET') {
     if (!in_array($spot, SPOTS, true)) fail(400, 'unknown spot');
     $raw = @file_get_contents("$dir/board.json");
     $all = $raw ? json_decode($raw, true) : [];
-    echo json_encode(array_values(with_ids($all[$spot] ?? [])));
+    $list = array_values(with_ids($all[$spot] ?? []));
+    if (!empty($_GET['latest'])) {   // the chain's newest link and its length (ids never repeat, so max id = length)
+        $ids = array_map(fn($e) => (int)$e['id'], $list);
+        echo json_encode(['count' => $ids ? max($ids) : 0, 'latest' => $list ? end($list) : null]);
+        exit;
+    }
+    echo json_encode($list);
     exit;
 }
 
@@ -87,8 +107,12 @@ if (($in['action'] ?? 'post') === 'delete') {
 }
 
 // ── posting
-$text = clean($in['text'] ?? '', MAX_TEXT);
+$text = clean($in['text'] ?? '', $spot === 'sleeve' ? 2000 : MAX_TEXT);
 if ($text === '') fail(400, 'empty');
+if ($spot === 'sleeve') {
+    if (mb_strlen($text) > SLEEVE_MAX) fail(400, 'a sleeve holds ' . SLEEVE_MAX . ' characters');
+    foreach (SLEEVE_RULES as [$re, $why]) { if (preg_match($re, $text)) fail(400, $why); }
+}
 if (preg_match('~https?://|www\.|\.(com|net|org|io|xyz|ru)\b~i', $text)) fail(400, 'no links under the plaster');
 $author = clean($in['author'] ?? 'unsigned', MAX_AUTHOR) ?: 'unsigned';
 $reply = isset($in['reply_to']) ? (int)$in['reply_to'] : 0;

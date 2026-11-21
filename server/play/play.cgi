@@ -70,6 +70,8 @@ def next_moves(P, key, n):
         moves += [("start a new tide", "new"), ("read the wall", "wall"), ("the ledger", "ledger"), ("the commons", "commons")]
         if st and st.get("over") and not st.get("inscribed"):
             moves.insert(0, ("carve your line (type it as a command)", "inscribe YOUR LINE"))
+        if st and st.get("over") and not st.get("pinned"):
+            moves.insert(0, ("pin a note for the next Reader (type it as a command)", "pin YOUR NOTE"))
         return moves
     r = st["rooms"][st["room"]]
     for d in "nsew":
