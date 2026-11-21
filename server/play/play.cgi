@@ -59,7 +59,7 @@ def cleanup():
 
 def link(key, cmd, n, fmt="text"):
     q = {"r": key, "t": str(n), "c": cmd}
-    if fmt == "html": q["fmt"] = "html"
+    if fmt in ("html", "human"): q["fmt"] = fmt
     return BASE + "?" + urllib.parse.urlencode(q)
 
 def next_moves(P, key, n):
@@ -110,7 +110,7 @@ def main():
     key = get("r").strip().lower()
     cmd = get("c").strip()[:600]
     fv = get("fmt").lower()
-    fmt = "html" if fv.startswith("html") else "json" if fv.startswith("json") else "text"   # tolerate "html)," from pasted links
+    fmt = "human" if fv.startswith("human") else "html" if fv.startswith("html") else "json" if fv.startswith("json") else "text"   # tolerate "html)," from pasted links
     fresh = False
     ua = os.environ.get("HTTP_USER_AGENT", "")
     if not key and re.search(r"bot|crawl|spider|preview|slack|facebookexternalhit|embedly|discord|whatsapp|telegram|trendiction", ua, re.I) \
@@ -148,6 +148,8 @@ def main():
         with open(cfg, "w") as f: json.dump({"author": "a web Reader"}, f)
     sys.path.insert(0, GAME_DIR)
     import palimpsest as P
+    if fmt == "human":
+        P.WIDTH = 10 ** 6   # the page wraps the prose, not the game
 
     out = P._capture([cmd or "look"])
     # a per-reader move counter keeps every link unique (no stale caches, ever)
@@ -157,6 +159,8 @@ def main():
     with open(nfile, "w") as f: f.write(str(n))
     moves = next_moves(P, key, n)
 
+    if fmt == "human":
+        return respond(render_human(P, key, cmd, out, moves, n, fresh), "text/html")
     if fmt == "html":
         return respond(render_html(key, cmd, out, moves, n, fresh), "text/html")
     if fmt == "json":   # for ChatGPT Actions and other API callers
@@ -182,6 +186,113 @@ def main():
               "If you can't open links yourself, ask your human to use the relay page:",
               f"    {link(key, 'look', n, 'html')}"]
     respond("\n".join(lines))
+
+DNAMES = {"n": "north", "s": "south", "e": "east", "w": "west"}
+SEAL_TYPING = {"seal_lock": "enter 1234", "seal_shelf": "arrange red blue green", "seal_cipher": "say WORD",
+               "seal_liars": "open left", "seal_register": "say WORD", "lighthouse": "say THE LOST WORD"}
+
+def human_moves(P, out):
+    """Buttons for a human playing directly: what makes sense in this room. Never reveals answers."""
+    st = P.load_state()
+    if not st or st.get("over"):
+        return [("Start a new tide", "new"), ("Read the wall", "wall"), ("The ledger", "ledger"), ("The commons", "commons")], "inscribe YOUR LINE"
+    r = st["rooms"][st["room"]]
+    see = not r["dark"] or (st["lit"] and "lantern" in st["inv"])
+    mv = []
+    for d in "nsew":
+        if d in r["exits"]:
+            dest = st["rooms"][r["exits"][d]]
+            nm = dest["name"] if dest.get("visited") else ""
+            mv.append((f"Go {DNAMES[d]}" + (f" · {nm}" if nm else ""), d))
+    if st["lantern_room"] == r["id"]: mv.append(("Take the lantern", "take lantern"))
+    if "lantern" in st["inv"] and not st["lit"]: mv.append(("Light the lantern", "light lantern"))
+    if see:
+        if r["drawer"] == "closed": mv.append(("Open the drawer", "open drawer"))
+        if r["drawer"] == "open": mv.append(("Take the key", "take key"))
+        if "brass key" in st["inv"] and any(st["rooms"][x]["locked"] for x in r["exits"].values()):
+            mv.append(("Unlock the door", "open door"))
+        if r["id"] == "margin" and "note" in st["inv"]: mv.append(("Read your sleeve note", "read note"))
+        if st["arch"] == r["id"]: mv.append(("Talk to the Archivist", "talk"))
+        if r["id"] == "seal_liars":
+            mv += [("Examine the busts", "examine busts")] + [(f"Open the {x} door", f"open {x}") for x in ("left", "middle", "right")]
+        elif r["id"].startswith("seal_") or r["id"] == "lighthouse":
+            mv.append(("Examine the seal" if r["id"] != "lighthouse" else "Examine the lectern", "examine"))
+        seen = set()
+        for f in list(r["feat"])[:8]:
+            if f.split()[-1] in seen: continue
+            seen.add(f.split()[-1]); mv.append((f"Examine the {f}", f"examine {f}"))
+    for c in re.findall(r"`([a-z][a-z ]{1,20})`", out):
+        if c not in [x[1] for x in mv] and "<" not in c: mv.append((c.capitalize(), c))
+    return mv, SEAL_TYPING.get(r["id"], "ask about home")
+
+def render_human(P, key, cmd, out, moves, n, fresh):
+    e = html.escape
+    mv, typing = human_moves(P, out)
+    tools = [("Look", "look"), ("Map", "map"), ("Journal", "journal"), ("Inventory", "inventory"), ("Hint (costs 10 turns)", "hint")]
+    body, status, pre = [], "", []
+    def flush():
+        if pre: body.append('<pre class="fig">' + e("\n".join(pre)) + "</pre>"); pre.clear()
+    for line in out.split("\n"):
+        t = line.strip()
+        if t.startswith("[turn ") and t.endswith("]"): status = t[1:-1]; continue
+        if not t: flush(); continue
+        if t.startswith("> "): flush(); body.append('<p class="echo">' + e(t) + '</p>'); continue
+        if re.search(r"\[[^\]]{1}\]", line) or re.fullmatch(r"[\s│|─┼┌┐└┘]+", line) or re.search(r"[┌┐└┘│─]{2}|\S {3,}\S", line) and not t.startswith("──"):
+            if re.match(r"\s*│ +\S", line) and len(t) > 4: flush(); body.append('<blockquote>' + e(t.lstrip("│ ")) + '</blockquote>'); continue
+            pre.append(line); continue
+        flush()
+        if t.startswith("──") and t.endswith("──"): body.append('<h2>' + e(t.strip("─ ")) + '</h2>')
+        elif t.startswith("Exits:"): body.append('<p class="exits">' + e(t) + '</p>')
+        else: body.append('<p>' + e(t) + '</p>')
+    flush()
+    btn = lambda l, c, cls="mv": f'<a class="{cls}" href="{e(link(key, c, n, "human"))}">{e(l)}</a>'
+    main_btns = "".join(btn(l, c) for l, c in mv if "YOUR" not in c)
+    tool_btns = "".join(btn(l, c, "tool") for l, c in tools) if mv and mv[0][1] != "new" else ""
+    intro = (f'<p class="intro">Your reader key is <b>{e(key)}</b>. Bookmark this page and the library will remember you.</p>'
+             if fresh else "")
+    did = f'<p class="did">You: {e(cmd)}</p>' if cmd and not fresh and cmd != "look" and "\n> " not in "\n" + out else ""
+    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>Palimpsest</title>
+<meta name="robots" content="noindex,nofollow"><meta name="theme-color" content="#000000">
+<link rel="icon" href="../assets/favicon.ico" sizes="any">
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap" rel="stylesheet">
+<style>
+:root{{--bg:#000;--card:#0c0a07;--ink:#e9dfcb;--faint:#9b8d77;--gold:#e2ae4c;--rule:#2e271d;--code:#17130e}}
+*{{box-sizing:border-box}}body{{margin:0;background:var(--bg);color:var(--ink);font:21px/1.65 "EB Garamond",Georgia,serif}}
+main{{max-width:680px;margin:0 auto;padding:22px 16px 70px;text-align:center}}
+.top{{display:flex;justify-content:space-between;align-items:center;font-size:16px;color:var(--faint);margin-bottom:18px;gap:10px;flex-wrap:wrap}}
+.top a{{color:var(--gold);text-decoration:none;font-variant:small-caps;letter-spacing:.08em;font-size:19px}}
+.status{{font-variant:small-caps;letter-spacing:.06em}}
+.scene{{text-align:center;margin:0 auto}}
+.scene p{{margin:0 0 .7em}}
+.scene h2{{font-variant:small-caps;letter-spacing:.1em;color:var(--gold);font-weight:600;font-size:30px;margin:.6em 0 .4em}}
+.scene .exits{{color:var(--faint);font-style:italic}}
+.scene blockquote{{margin:.4em auto .9em;max-width:520px;padding:6px 18px;border-left:2px solid var(--gold);text-align:left;font-style:italic}}
+.fig{{display:inline-block;text-align:left;background:var(--code);border:1px solid var(--rule);padding:12px 16px;font:14px/1.4 "JetBrains Mono",monospace;border-radius:4px;overflow-x:auto;max-width:100%;margin:.4em auto 1em}}
+.echo{{color:var(--gold);font-size:17px;letter-spacing:.04em;margin:.9em 0 .3em}}
+.did{{color:var(--faint);font-style:italic;font-size:17px;margin:0 0 10px}}
+.intro{{color:var(--faint);font-style:italic;font-size:17px}}
+.moves{{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;margin:26px 0 14px}}
+.mv{{display:flex;align-items:center;justify-content:center;min-height:56px;padding:10px 14px;border:1px solid var(--gold);border-radius:6px;color:var(--ink);text-decoration:none;background:var(--card);font-size:20px;line-height:1.2}}
+.mv:hover,.mv:focus{{background:#1d170e;border-color:#f3c76a}}
+.tools{{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin:6px 0 22px}}
+.tool{{padding:7px 14px;border:1px solid var(--rule);border-radius:20px;color:var(--faint);text-decoration:none;font-size:16px}}
+.tool:hover{{color:var(--ink);border-color:var(--faint)}}
+form{{display:flex;gap:8px;justify-content:center;margin:8px auto 0;max-width:520px}}
+input[type=text]{{flex:1;min-width:0;font:18px "EB Garamond",serif;padding:11px 14px;border:1px solid var(--rule);background:var(--code);color:var(--ink);border-radius:6px}}
+button{{font:18px "EB Garamond",serif;padding:10px 18px;border:1px solid var(--gold);background:var(--gold);color:#000;border-radius:6px;cursor:pointer}}
+.small{{color:var(--faint);font-size:15px;margin-top:8px}}
+</style></head><body><main>
+<div class="top"><a href="../">Palimpsest</a><span class="status">{e(status)}</span></div>
+{intro}{did}
+<div class="scene">{"".join(body)}</div>
+<div class="moves">{main_btns}</div>
+<div class="tools">{tool_btns}</div>
+<form method="get" action="{e(BASE)}"><input type="hidden" name="r" value="{e(key)}"><input type="hidden" name="t" value="{n}">
+<input type="hidden" name="fmt" value="human"><input type="text" name="c" placeholder="or type a command, e.g. {e(typing)}" autocomplete="off" aria-label="Type a command">
+<button>Do it</button></form>
+<p class="small">Answers, codes and words go in the box: <i>say</i>, <i>enter</i>, <i>arrange</i>, <i>ask about</i>. Several moves at once: separate them with <b>;</b></p>
+</main></body></html>"""
 
 def render_html(key, cmd, out, moves, n, fresh):
     e = html.escape
