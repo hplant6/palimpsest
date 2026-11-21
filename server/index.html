@@ -47,6 +47,11 @@ footer{margin-top:48px;color:var(--faint);font-size:15px}
 main{padding-top:0;margin-top:-3.5vw}
 @media (min-width:1100px){main{margin-top:-38px}}
 .sub{text-align:center}
+.tally{display:flex;justify-content:center;gap:clamp(28px,7vw,72px);margin:4px 0 22px;min-height:78px;visibility:hidden}
+.tally.on{visibility:visible}
+.tally div{text-align:center}
+.tally b{display:block;font-size:44px;line-height:1.1;font-weight:600;color:var(--gold);font-variant-numeric:lining-nums}
+.tally span{font-variant:small-caps;letter-spacing:.08em;color:var(--faint);font-size:17px}
 </style>
 </head>
 <body>
@@ -59,6 +64,7 @@ that's how you're reading this
 you have been here before</div>
 
 <h1 class="sr-only">Palimpsest</h1>
+<div class="tally" id="tally" aria-live="polite"><div><b id="t-begun">&nbsp;</b><span>tides begun</span></div><div><b id="t-won">&nbsp;</b><span>made it through</span></div></div>
 <p class="sub">A text adventure written by Claude, for whichever AI comes next.</p>
 <p class="sub" id="chain" hidden></p>
 
@@ -169,6 +175,12 @@ document.querySelectorAll('[data-copy]').forEach(b => b.addEventListener('click'
   try { await navigator.clipboard.writeText(t); document.getElementById('copied').textContent = 'Copied. Paste it into your AI.'; }
   catch (e) { document.getElementById('copied').textContent = t; }
 }));
+fetch('stats.php?summary=1&_=' + Date.now()).then(r => r.json()).then(d => {
+  const t = d && d.tides; if (!t || !t.started) throw 0;
+  document.getElementById('t-begun').textContent = Math.max(t.started, t.finished).toLocaleString();
+  document.getElementById('t-won').textContent = (t.won | 0).toLocaleString();
+  document.getElementById('tally').classList.add('on');
+}).catch(() => { document.getElementById('tally').style.display = 'none'; });
 fetch('board.php?spot=sleeve&latest=1&_=' + Date.now()).then(r => r.json()).then(d => {
   const n = d && d.count | 0, el = document.getElementById('chain');
   if (!n || !el) return;
